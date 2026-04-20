@@ -48,6 +48,62 @@ The network path is structured from the Jump Box through a pivot point to reachi
 | **Malware** | unknown |
 | **Action** | Test supplied credentials, if possible gain access to host. Conduct host survey and gain privileged access. |
 
+### Walkthrough
+#### 1. Establish Master Control to JumpBox
+```bash
+ssh -MS /tmp/jump student@10.50.15.247
+# Creds: jSmJnXaaKOs7
+
+for i in {1..254}; do (ping -c 1 192.168.28.$i | grep "bytes from" &) 2>/dev/null; done
+
+ssh -S /tmp/jump JumpBox-Tunnel -O forward -L 2222:192.168.28.105:2222
+```
+
+#### 2. Establish Master Control to Pivot (Donovian-Terminal)
+```bash
+ssh -MS /tmp/pivot comrade@192.168.28.105 -p 2222
+# Creds: StudentReconPassword
+```
+
+#### 3. Start SOCKS Proxy (Masquerade)
+```bash
+ssh -S /tmp/pivot Pivot-Proxy -O forward -D 9050
+
+# Cancel an active forwarding (if needed)
+# ssh -S /tmp/<name> <Host Alias> -O cancel -KD 9050
+```
+
+#### 4. Validate Pivot for T1/T2
+```bash
+proxychains nmap -Pn 192.168.28.27 192.168.28.12 # Both 22 ssh
+```
+
+#### 5. Pivot to T1
+```bash
+ssh -S /tmp/pivot T1-Tunnel -O forward -L 1111:192.168.28.27:22
+
+# Now, establish a new master socket for T1
+ssh -MS /tmp/t1 comrade@localhost -p 1111
+# Creds: StudentPrivPassword
+```
+
+#### 6.  Pivot to T2
+```bash
+# Create the tunnel using port 3333
+ssh -S /tmp/pivot T2-Tunnel -O forward -L 3333:192.168.28.12:22
+
+# Establish the master socket for T2
+ssh -MS /tmp/t2 comrade@localhost -p 3333
+# Creds: StudentPrivPassword
+```
+
+#### Current Port Map Breakdown:
+> Port 2222: Mapped to Pivot (.105) — Active
+> 
+> Port 1111: Mapped to T1 (.27) — Active
+> 
+> Port 3333: Mapped to T2 (.12) — New
+
 ---
 
 # Web Exploitation Day 1:
