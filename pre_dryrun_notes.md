@@ -104,6 +104,40 @@ ssh -MS /tmp/t2 comrade@localhost -p 3333
 > 
 > Port 3333: Mapped to T2 (.12) — New
 
+#### If a target is internal to T1
+Meaning it's on a private network that only T1 can see
+
+* **Jump Box**
+    * **Pivot:** 192.168.28.105
+        * **T1:** 192.168.28.27
+            * **T3:** 192.168.28.27
+        * **T2:** 192.168.28.12
+
+If T3 (x.x.x.x) is only reachable from T1:
+
+#### 1. Use the T1 socket to create a forward to T3:
+```bash
+# 1. Look for new networks from T1 shell
+# (Inside T1 shell): ip addr  OR  route -n
+
+# 2. Forward a local port through the T1 SOCKET to the hidden target
+ssh -S /tmp/t1 T1-Tunnel -O forward -L 4444:<Internal_T3_IP>:22
+
+# 3. Establish T3 Master
+ssh -MS /tmp/t3 comrade@localhost -p 4444
+```
+
+#### Refined Port Map Breakdown
+Here is how your notes should look to distinguish between `Broad` pivoting (from Pivot) and `Deep` pivoting (through T1):
+
+> Pivot	Jump ---> .105 ------- Reach the 192.168.28.x network
+> 
+> T1 Pivot -------> .27 ------------ Gain access to T1 host
+> 
+> T2 Pivot -------> .12 ------------ Gain access to T2 host (Sibling to T1)
+> 
+> T3 (Deep)	T1 --> x.x.x.x ---- Access network behind T1
+
 ---
 
 # Web Exploitation Day 1:
